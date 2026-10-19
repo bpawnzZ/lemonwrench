@@ -1,3 +1,4 @@
+.reddit/
 __pycache__/
 *.pyc
 .cache/
