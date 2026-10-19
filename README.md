@@ -4,6 +4,12 @@
 
 Named for [lemon-manuals.la](https://lemon-manuals.la), the source it scrapes: ~10,000 US/Canada vehicles, 1960–2025, free, no login. Two databases per year — a 2025 capture (`LEMON`) for modern cars and 2013 DVD dumps (`CHARM`) for 90s/2000s, which still carry the finer detail.
 
+> ### 👉 [See the example output — a full job note](examples/2007-pontiac-g6-3.9l-valve-cover-gaskets.md)
+> **2007 Pontiac G6 GT 3.9L valve cover gaskets**: both sides step-by-step, a 20-fastener torque table, the blocking bracket identified from a parts catalog, 19 captioned manual figures, and a confidence column that separates what the manual says from what mechanics say.
+>
+> ![Example note — right valve rocker arm cover](examples/figures/GM1557668.png)
+
+
 ```
 $ python3 scripts/lemon.py index "Pontiac/2007/G6 V6-3.9L"
 indexed /Pontiac/2007/G6%20V6-3.9L/Repair%20and%20Diagnosis/ (2825 KB)
@@ -93,7 +99,7 @@ python3 scripts/lemon.py note https://lemon-manuals.la/images25/GM1557668/ "righ
 
 ## Example output
 
-`examples/2007-pontiac-g6-3.9l-valve-cover-gaskets.md` — a real job note, rendered with its figures: blocking bracket identified, 20-fastener torque table, both sides in order, captioned exploded views, and a confidence column separating what the manual says from what mechanics say.
+**[examples/2007-pontiac-g6-3.9l-valve-cover-gaskets.md](examples/2007-pontiac-g6-3.9l-valve-cover-gaskets.md)** — a real job note, rendered with its figures: blocking bracket identified, 20-fastener torque table, both sides in order, captioned exploded views, and a confidence column separating what the manual says from what mechanics say.
 
 ![Right valve rocker arm cover](examples/figures/GM1557668.png)
 
