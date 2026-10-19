@@ -1,6 +1,8 @@
 # 🔧 LemonWrench
 
-**A repair-research skill that turns a car into a procedure, a torque table, and labelled figures — from free OEM service manuals, not forum guesswork.**
+**A skill for AI coding agents — Claude Code, Hermes, or any harness that reads `SKILL.md`** — that turns a car into a procedure, a torque table, and labelled figures, from free OEM service manuals.
+
+You drop the folder in, and your agent gets a lookup procedure plus a stdlib script for a free service-manual site. Ask it "rear valve cover torque on a 3.9L" and it comes back with the steps, the numbers and the manual's figures. The script runs on its own too if you don't use an agent.
 
 Named for [lemon-manuals.la](https://lemon-manuals.la), the source it scrapes: ~10,000 US/Canada vehicles, 1960–2025, free, no login. Two databases per year — a 2025 capture (`LEMON`) for modern cars and 2013 DVD dumps (`CHARM`) for 90s/2000s, which still carry the finer detail.
 

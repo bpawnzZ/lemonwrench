@@ -1,0 +1,1 @@
+A repair-research skill that pulls real OEM service manuals, torque specs and diagrams
