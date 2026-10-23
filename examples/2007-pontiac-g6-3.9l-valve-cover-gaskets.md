@@ -13,6 +13,11 @@ status: in progress — intake off, alternator off, rear cover being attacked
 
 # 2007 Pontiac G6 GT 3.9L (LZ9) — Valve Cover Gaskets, Both Sides
 
+> [!note] Figures
+> The scans embedded below are the publisher's artwork, so they aren't committed here.
+> Run `./fetch-figures.sh` in this folder once to pull all 19 into `figures/`; the note
+> then renders in full.
+
 > [!info] Where the job stands
 > Intake manifold/cover off, alternator (GM calls it the **generator**) off, down to the **rear (GM "right side") valve cover**.
 > Blocker: an alternator-mounted bracket appears to cover a rear valve cover bolt.
