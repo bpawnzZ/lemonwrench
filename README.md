@@ -7,7 +7,7 @@ You drop the folder in, and your agent gets a lookup procedure plus a stdlib scr
 Named for [lemon-manuals.la](https://lemon-manuals.la), the source it scrapes: ~10,000 US/Canada vehicles, 1960–2025, free, no login. Two databases per year — a 2025 capture (`LEMON`) for modern cars and 2013 DVD dumps (`CHARM`) for 90s/2000s, which still carry the finer detail.
 
 > ### 👉 [See the example output — a full job note](examples/2007-pontiac-g6-3.9l-valve-cover-gaskets.md)
-> **2007 Pontiac G6 GT 3.9L valve cover gaskets**: both sides step-by-step, a 20-fastener torque table, the blocking bracket identified from a parts catalog, 19 captioned manual figures, and a confidence column that separates what the manual says from what mechanics say. Run `examples/fetch-figures.sh` once to pull the figures it embeds.
+> **2007 Pontiac G6 GT 3.9L valve cover gaskets**: both sides step-by-step, a 20-fastener torque table, the blocking bracket identified from a parts catalog, 19 captioned manual figures, and a confidence column that separates what the manual says from what mechanics say — with all 19 of the manual's figures committed alongside it.
 
 ```
 $ python3 scripts/lemon.py index "Pontiac/2007/G6 V6-3.9L"
@@ -56,7 +56,7 @@ Generic web search gives you a forum thread from 2011 with a broken Photobucket 
 | `SKILL.md` | The agent skill: workflow, answering rules, gotchas, deliverable format |
 | `scripts/lemon.py` | Stdlib-only navigator — indexes a vehicle's link tree once, then answers from a local grep |
 | `references/repair-writeup.md` | Turning the lookups into a durable note: manual vs field, section order, the confidence column |
-| `examples/` | A complete worked note (2007 G6 GT 3.9L valve cover gaskets) and the script that pulls its 19 figures |
+| `examples/` | A complete worked note (2007 G6 GT 3.9L valve cover gaskets) **with all 19 manual figures committed** |
 
 ## Install
 
@@ -103,18 +103,21 @@ python3 scripts/lemon.py note https://lemon-manuals.la/images25/GM1557668/ "righ
 
 ## Example output
 
-**[examples/2007-pontiac-g6-3.9l-valve-cover-gaskets.md](examples/2007-pontiac-g6-3.9l-valve-cover-gaskets.md)** — a real job note: blocking bracket identified, 20-fastener torque table, both sides in order, captioned exploded views, and a confidence column separating what the manual says from what mechanics say.
+**[examples/2007-pontiac-g6-3.9l-valve-cover-gaskets.md](examples/2007-pontiac-g6-3.9l-valve-cover-gaskets.md)** — a real job note, rendered with its figures: blocking bracket identified, 20-fastener torque table, both sides in order, captioned exploded views, and a confidence column separating what the manual says from what mechanics say.
 
-The note embeds the manual's own scans, which are the publisher's artwork — so they aren't redistributed in this repo. Pull them once into `examples/figures/`:
+![Right valve rocker arm cover](examples/figures/GM1557668.png)
+
+|  |  |
+|---|---|
+| ![Power steering pump assembly](examples/figures/GM1774493.png) | ![Engine front cover and gasket](examples/figures/GM1557694.png) |
 
 ```bash
-cd examples && ./fetch-figures.sh    # 19 figures, ~370 KB
+cd examples && ./fetch-figures.sh    # re-pull or refresh the figure set
 ```
-
-The note renders fully once they're local.
 
 ## Notes
 
+- Figures ship with the example (19 scans) and can be refreshed anytime with `examples/fetch-figures.sh`.
 - Mirrors, if the main host is down: `lemon-manuals.org.ua`, `lemon-manuals.gy`, `lemon.dogeware.me` — used automatically; set `LEMON_BASE` to pin one host instead.
 - The skill is source-agnostic in method: swap the manual site and the three-source rule still applies.
 - Be a good citizen: the cache exists so one session touches the site a handful of times, not hundreds. Don't disable it to crawl.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Populate examples/figures/ from the manual. Figures are OEM scans and are not
-# committed; this pulls them on demand using scripts/lemon.py.
+# Refresh examples/figures/ from the manual. The 19 scans are committed, so this
+# is only needed to re-pull or replace them, using scripts/lemon.py.
 set -euo pipefail
 cd "$(dirname "$0")"
 
