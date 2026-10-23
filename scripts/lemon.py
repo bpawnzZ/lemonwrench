@@ -8,6 +8,7 @@
   lemon.py find VEHICLE TERM... [--any] [-n N]
   lemon.py get PATH_OR_URL                   # clean text of one manual page
   lemon.py read VEHICLE TERM... [-n N]       # find + fetch best hit
+  lemon.py torque VEHICLE [PART...] [-p N]   # torque pages, spec lines extracted
   lemon.py sub PATH_OR_URL                   # child pages under a hub page
   lemon.py imgs PATH_OR_URL                  # figure URLs on a page
   lemon.py pic URL                           # download a figure -> local path
@@ -15,16 +16,22 @@
   lemon.py notes [URL]                       # show cached descriptions
 
 VEHICLE is the site path without slashes, e.g. "Toyota/2015/Camry LE".
-Stdlib only.
+Stdlib only, Python 3.9+. Pages cache for 7 days (LEMON_TTL seconds, or
+LEMON_NOCACHE=1); fetches retry and fail over to a mirror on their own.
 """
-import hashlib, html as htmllib, json, os, re, ssl, sys
+import hashlib, html as htmllib, json, os, re, ssl, sys, time
 import urllib.error, urllib.parse, urllib.request
 
 BASE = os.environ.get("LEMON_BASE", "https://lemon-manuals.la")
 MIRRORS = ["https://lemon-manuals.la", "https://lemon-manuals.org.ua",
            "https://lemon-manuals.gy", "https://lemon.dogeware.me"]
 CACHE = os.path.expanduser("~/.cache/lemon")
-UA = "Mozilla/5.0 (X11; Linux x86_64) lemon-manuals-skill/1.0"
+UA = "Mozilla/5.0 (X11; Linux x86_64) lemon-manuals-skill/2.1"
+INDEX_VERSION = "2"                     # bump when the .idx layout changes
+PAGE_TTL = int(os.environ.get("LEMON_TTL", 7 * 86400))
+NOCACHE = os.environ.get("LEMON_NOCACHE") == "1"
+RETRY = (408, 429, 500, 502, 503, 504)
+NOT_FOUND = "<title>Page Not Found</title>"
 
 
 def _ctx():
@@ -32,19 +39,76 @@ def _ctx():
     return ssl.create_default_context(cafile=caf if os.path.exists(caf) else None)
 
 
-def fetch(url, timeout=120):
-    if url.startswith("/"):
-        url = BASE + url
-    if not url.endswith("/") and "?" not in url:
-        url += "/"
+def _bases():
+    """LEMON_BASE first, then the mirrors that aren't it."""
+    return [BASE] + [m for m in MIRRORS if m.rstrip("/") != BASE.rstrip("/")]
+
+
+def _ours(url):
+    return any(url.startswith(b) for b in _bases())
+
+
+def _swap_base(url, base):
+    for b in _bases():
+        if url.startswith(b):
+            return base + url[len(b):]
+    return url
+
+
+def _page_path(url):
+    return os.path.join(CACHE, "pages", hashlib.md5(url.encode()).hexdigest() + ".html")
+
+
+def _get(url, timeout):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=_ctx()) as r:
             return r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            return "<title>Page Not Found</title>"
+            return NOT_FOUND
         raise
+
+
+def _try(url, timeout):
+    """One host, retried on the errors that are worth retrying."""
+    last = None
+    for attempt in range(3):
+        try:
+            return _get(url, timeout)
+        except urllib.error.HTTPError as e:
+            if e.code not in RETRY:
+                raise
+            last = e
+        except (urllib.error.URLError, OSError) as e:   # timeout, DNS, TLS
+            last = e
+        if attempt < 2:
+            time.sleep(1 + 2 * attempt)
+    raise last
+
+
+def fetch(url, timeout=120, nocache=False):
+    """Cached GET, retried, with mirror failover. never raises a bare traceback."""
+    if url.startswith("/"):
+        url = BASE + url
+    if not url.endswith("/") and "?" not in url:
+        url += "/"
+    path = _page_path(url)
+    if not (nocache or NOCACHE) and os.path.exists(path):
+        if time.time() - os.path.getmtime(path) < PAGE_TTL:
+            return open(path, encoding="utf-8").read()
+    last = None
+    for base in _bases():
+        try:
+            body = _try(_swap_base(url, base), timeout)
+        except Exception as e:                          # this host is out, try the next
+            last = e
+            continue
+        if not NOCACHE:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            open(path, "w", encoding="utf-8").write(body)
+        return body
+    sys.exit(f"all hosts failed for {url}: {last}")
 
 
 def compact(u):
@@ -95,7 +159,7 @@ def links(page_url, page_html):
         if not href or href.startswith(("#", "javascript:", "mailto:")):
             continue
         u = urllib.parse.urljoin(page_url, href)
-        if not u.startswith(BASE) or "/static/" in u or u.rstrip("/") == BASE:
+        if not _ours(u) or "/static/" in u or u.rstrip("/") == BASE:
             continue
         if any(x in u for x in ("/bundle/", "/hyperlink/", "style.css", "about.html")):
             continue
@@ -125,7 +189,7 @@ def text_of(page_html):
 
 
 def idx_path(vehicle):
-    key = hashlib.md5(compact(vehicle).encode()).hexdigest()[:16]
+    key = hashlib.md5((INDEX_VERSION + compact(vehicle)).encode()).hexdigest()[:16]
     return os.path.join(CACHE, key + ".idx")
 
 
@@ -138,7 +202,7 @@ def build_index(vehicle, refresh=False):
     for cand in (v + "Repair%20and%20Diagnosis%20%28Single%20Page%29/",
                  v + "Repair%20and%20Diagnosis/"):
         try:
-            body = fetch(BASE + urllib.parse.quote(cand, safe="/%"))
+            body = fetch(BASE + urllib.parse.quote(cand, safe="/%"), nocache=refresh)
         except Exception:
             continue
         if "Page Not Found" in body[:600]:
@@ -150,7 +214,7 @@ def build_index(vehicle, refresh=False):
         sys.exit(f"no Repair and Diagnosis tree for {vehicle!r} — check `cars` output")
     try:
         lt = BASE + v + "Labor%20Times/"
-        body = fetch(lt)
+        body = fetch(lt, nocache=refresh)
         if "Page Not Found" not in body[:600] and "Labor times are only available" not in body:
             pages.append((lt, body))
             print("indexed Labor Times", file=sys.stderr)
@@ -260,6 +324,60 @@ def search(vehicle, terms, need=None, n=10):
     return rows[:n]
 
 
+TORQUE_UNIT = re.compile(
+    r"\d+(?:[.,]\d+)?\s*(?:N[.\s·*]*m\b|kgf[.\s·*]*cm\b|lb[.\s-]*(?:in|ft)\b|ft[.\s-]*lb\b)",
+    re.I)
+
+
+def torque_lines(page_text):
+    """Lines that carry a torque figure, deduped, order kept. ponytail: prose lines, not a
+    parsed table — the site prints one fastener per line, so a table is fiction until it isn't."""
+    out, seen = [], set()
+    for line in page_text.splitlines():
+        line = line.strip(" |-")
+        if not 6 <= len(line) <= 300 or not TORQUE_UNIT.search(line):
+            continue
+        key = re.sub(r"\W+", " ", line.lower()).strip()
+        if key not in seen:
+            seen.add(key)
+            out.append(line)
+    return out
+
+
+def torque(vehicle, terms, want=3, cap=40):
+    """Spec lines for a component. Component pages are often hubs, so descend one level."""
+    rows = search(vehicle, list(terms) + ["torque"], need=1, n=80)
+
+    def prefer(r):                       # part match first, spec pages next, "torque
+        l = norm(r[2])                   # converter" is not a torque spec
+        return (1 if "torque converter" in l else 0,
+                sum(1 for t in terms if t.lower() not in l),
+                0 if "specification" in l else 1)
+
+    rows.sort(key=prefer)
+    hits, seen = 0, set()
+    for _, url, label in rows:
+        if hits >= want:
+            break
+        if label in seen:
+            continue
+        seen.add(label)
+        body = fetch(url)
+        lines, target = torque_lines(text_of(body)), (url, label)
+        for sub_url, sub_label in ([] if lines else sublinks(url, body)[:4]):
+            if not lines:
+                lines, target = (torque_lines(text_of(fetch(sub_url))),
+                                 (sub_url, sub_label))
+        if not lines:
+            continue
+        hits += 1
+        print(f"\n## {target[1]}\n{target[0]}")     # raw URL: it is what `get` accepts
+        print("\n".join(lines[:cap]))
+    if not hits:
+        sys.exit(f"no torque figures in {vehicle!r} for {' '.join(terms) or 'anything'}"
+                 " — try `find VEHICLE torque specifications`")
+
+
 def selftest():
     assert compact("Toyota/2015/Camry LE") == "/Toyota/2015/Camry%20LE/"
     assert norm("Brakes/Front%20Brake%20%5B09%2F2014%20-%20%5D") == "brakes front brake"
@@ -270,6 +388,14 @@ def selftest():
     assert "LEMON Manuals" not in text_of(h) and "X" in text_of(h)
     assert score("Torque Specifications", "/v/x/Torque/", ["torque"], 1) is not None
     assert score("Torque", "/v/x/Y/", ["brake"], 1) is None
+    assert _swap_base("https://lemon-manuals.la/v/x/", "https://lemon.dogeware.me") \
+        == "https://lemon.dogeware.me/v/x/"
+    assert _page_path("/v/x/").endswith(".html")
+    t = ("Tighten the bolts to 10 N.m (89 lb in).\n"
+         "Oil pan bolts | 50 N·m (37 ft·lb)\n"
+         "Fig 4: cylinder numbering 1 2 3\n")
+    assert len(torque_lines(t)) == 2, torque_lines(t)
+    assert torque_lines("no numbers here at all") == []
     b = "https://lemon-manuals.la/v/x/"
     assert [u for u, _ in sublinks(b, '<a href="y/">Y</a><a href="/v/x/">self</a>')] == [b + "y/"]
     print("selftest OK")
@@ -302,7 +428,7 @@ def main(argv):
                 continue
             label = re.sub(r"\s+", " ", htmllib.unescape(re.sub(r"<[^>]+>", "", m.group(2)))).strip()
             u = urllib.parse.urljoin(url, htmllib.unescape(h.group(1)))
-            if depth(u) != 3 or not u.startswith(BASE):
+            if depth(u) != 3 or not _ours(u):
                 continue
             cur = [d for p, d in pos_db if p < m.start()]
             cur = cur[-1] if cur else "?"
@@ -334,12 +460,21 @@ def main(argv):
             sys.exit(f"no match in {vehicle!r} for {' '.join(terms)}")
         v = compact(vehicle)
         for s, url, label in rows:
-            rel = urllib.parse.unquote(url[len(BASE) + 1:].removeprefix(v))
+            rel = urllib.parse.unquote(re.sub(r"^https?://[^/]+/", "", url).removeprefix(v.strip("/") + "/"))
             rel = re.sub(r"\s*\[\d{1,2}/\d{4} - \]", "", rel)
             print(f"{rel}\t{label}")
         if cmd == "read":
             print("\n" + "=" * 70 + "\n", file=sys.stderr)
             read_page(rows[min(pick, len(rows)) - 1][1], terms)
+    elif cmd == "torque":
+        if "-p" in args:
+            i = args.index("-p")
+            want, args = int(args[i + 1]), args[:i] + args[i + 2:]
+        else:
+            want = 3
+        if not args:
+            sys.exit("give a vehicle")
+        torque(args[0], args[1:], want)
     elif cmd == "get":
         print(render(args[0]))
     elif cmd == "sub":
@@ -385,3 +520,7 @@ if __name__ == "__main__":
         main(sys.argv[1:])
     except BrokenPipeError:      # piping into head/tail is normal use
         os._exit(0)
+    except urllib.error.HTTPError as e:
+        sys.exit(f"http {e.code} from {e.url} — the host may be down; try again or set LEMON_BASE")
+    except KeyboardInterrupt:
+        sys.exit(130)
