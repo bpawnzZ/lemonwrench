@@ -241,7 +241,7 @@ Write the result as a standalone markdown note, not chat prose:
 - captioned figure embeds
 - **sources/confidence table** — claim, source, verified / field consensus
 
-See `examples/` for a complete worked note, and `references/repair-writeup.md` for the
+See `examples/` for complete worked notes (a GM valve-cover job and a Dodge Nitro drive belt), and `references/repair-writeup.md` for the
 full write-up procedure: how to reconcile manual against field reality, the note's
 section order, the confidence column, and how to hand the figures over.
 

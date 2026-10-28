@@ -56,7 +56,7 @@ Generic web search gives you a forum thread from 2011 with a broken Photobucket 
 | `SKILL.md` | The agent skill: workflow, answering rules, gotchas, deliverable format |
 | `scripts/lemon.py` | Stdlib-only navigator — indexes a vehicle's link tree once, then answers from a local grep |
 | `references/repair-writeup.md` | Turning the lookups into a durable note: manual vs field, section order, the confidence column |
-| `examples/` | A complete worked note (2007 G6 GT 3.9L valve cover gaskets) **with all 19 manual figures committed** |
+| `examples/` | Two complete worked notes — 2007 G6 GT 3.9L valve cover gaskets, and 2011 Dodge Nitro 3.7L drive belt — **with all 23 manual figures committed** |
 
 ## Install
 
@@ -105,11 +105,14 @@ python3 scripts/lemon.py note https://lemon-manuals.la/images25/GM1557668/ "righ
 
 **[examples/2007-pontiac-g6-3.9l-valve-cover-gaskets.md](examples/2007-pontiac-g6-3.9l-valve-cover-gaskets.md)** — a real job note, rendered with its figures: blocking bracket identified, 20-fastener torque table, both sides in order, captioned exploded views, and a confidence column separating what the manual says from what mechanics say.
 
+**[examples/2011-dodge-nitro-3.7l-drive-belt.md](examples/2011-dodge-nitro-3.7l-drive-belt.md)** — the same treatment for a 30-minute job: one belt, one tensioner rotated to its stop, one plastic tank that has to move first. The torque table carries the two figures that are *not* in the manual honestly marked (reservoir screws, battery nut), flags a real water-pump spec conflict between two manual pages instead of picking one, and the 4.0L variant gets its own section because its tensioner releases the other way.
+
 ![Right valve rocker arm cover](examples/figures/GM1557668.png)
 
 |  |  |
 |---|---|
 | ![Power steering pump assembly](examples/figures/GM1774493.png) | ![Engine front cover and gasket](examples/figures/GM1557694.png) |
+| ![3.7L pulley layout and belt routing](examples/figures/GC0085898.jpg) | ![3.7L tensioner wear indicator](examples/figures/GC0085899.jpg) |
 
 ```bash
 cd examples && ./fetch-figures.sh    # re-pull or refresh the figure set
@@ -117,7 +120,7 @@ cd examples && ./fetch-figures.sh    # re-pull or refresh the figure set
 
 ## Notes
 
-- Figures ship with the example (19 scans) and can be refreshed anytime with `examples/fetch-figures.sh`.
+- Figures ship with the examples (23 scans, `.png` for GM and `.jpg` for Chrysler — the manual serves both) and can be refreshed anytime with `examples/fetch-figures.sh`.
 - Mirrors, if the main host is down: `lemon-manuals.org.ua`, `lemon-manuals.gy`, `lemon.dogeware.me` — used automatically; set `LEMON_BASE` to pin one host instead.
 - The skill is source-agnostic in method: swap the manual site and the three-source rule still applies.
 - Be a good citizen: the cache exists so one session touches the site a handful of times, not hundreds. Don't disable it to crawl.
