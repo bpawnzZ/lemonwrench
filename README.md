@@ -90,7 +90,7 @@ python3 scripts/lemon.py sub  "https://lemon-manuals.la/.../Alternator/"        
 python3 scripts/lemon.py get  "https://lemon-manuals.la/.../Service%20and%20Repair/"
 ```
 
-If the host is slow or down, fetches retry with a backoff and then fail over to a mirror on their own.
+If the host is slow or down, fetches retry with a backoff, then fail over through the mirror chain — `charm.li` first (a different host and corpus), then the LEMON mirrors — remembering which host last answered. A 404 or Cloudflare wall counts as a failed host, not a page, so nothing bogus lands in the cache. If everything is unreachable, it falls back to an Internet Archive snapshot.
 
 ## Figures
 
@@ -121,7 +121,7 @@ cd examples && ./fetch-figures.sh    # re-pull or refresh the figure set
 ## Notes
 
 - Figures ship with the examples (23 scans, `.png` for GM and `.jpg` for Chrysler — the manual serves both) and can be refreshed anytime with `examples/fetch-figures.sh`.
-- Mirrors, if the main host is down: `lemon-manuals.org.ua`, `lemon-manuals.gy`, `lemon.dogeware.me` — used automatically; set `LEMON_BASE` to pin one host instead.
+- Fallbacks, in order: `charm.li` (Operation CHARM — its own host and its own corpus), then `lemon-manuals.org.ua`, `lemon-manuals.gy`, `lemon.dogeware.me`; then an Internet Archive snapshot if every host is down. Used automatically. `LEMON_BASE` puts one host first, `LEMON_BUDGET` (default 240 s) caps the whole chain, and `~/.cache/lemon/hosts.json` remembers which host last answered.
 - The skill is source-agnostic in method: swap the manual site and the three-source rule still applies.
 - Be a good citizen: the cache exists so one session touches the site a handful of times, not hundreds. Don't disable it to crawl.
 

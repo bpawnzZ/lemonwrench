@@ -1,7 +1,7 @@
 ---
 name: lemonwrench
 description: "Use when looking up car repair procedures, torque specs, diagrams or service-manual steps. Scrapes free OEM manuals by vehicle, resolves the exact trim/engine, and cross-checks parts catalogs and field sources."
-version: 2.1.0
+version: 2.2.0
 author: LemonWrench contributors
 license: MIT
 platforms: [linux, macos, windows]
@@ -257,9 +257,32 @@ section order, the confidence column, and how to hand the figures over.
   the tool printed; re-quoting a decoded path 404s.
 - Banner "back up on a temporary server / slowness possible" is skipped by the
   parser; allow 120 s timeouts.
-- Mirrors: `lemon-manuals.org.ua`, `lemon-manuals.gy`, `lemon.dogeware.me`. The
-  script fails over to them automatically on a timeout or 429/5xx; `LEMON_BASE=https://…`
-  pins one host and disables failover.
+- Mirrors: `charm.li` (Operation CHARM — separate host *and* corpus, tried second),
+  then `lemon-manuals.org.ua`, `lemon-manuals.gy`, `lemon.dogeware.me`. The script
+  fails over automatically on a timeout, 404 or 429/5xx; `LEMON_BASE=https://…` puts
+  one host first without disabling the rest.
+- **A reply that isn't a page is a failed host, not an answer.** 404 bodies and
+  Cloudflare challenge pages become `NotFound`/`Blocked` inside `_get()`, are skipped
+  per host, and are never written to the page cache. `fetch()` only returns the
+  `Page Not Found` sentinel when *every* host 404s — before 2.2 the first host to 404
+  "won" and its 29-byte body was cached for 7 days.
+- Host health lives in `~/.cache/lemon/hosts.json`: the last host that answered is
+  tried first and a host that errored sorts **last** for 15 minutes (`DOWN_FOR`).
+  Delete the file to reset. The whole chain is capped by `LEMON_BUDGET` seconds
+  (default 240) so a dead host cannot eat the call; `PER_HOST` (45 s) is *silence*
+  before a host loses its turn, so a slow host that keeps sending bytes is never cut
+  off.
+- If every host errors, `fetch()` tries an Internet Archive snapshot
+  (`archive.org/wayback/available`, fetched with the `if_` modifier). archive.org
+  rate-limits hard from some networks — 429 there just means "no archive", not a
+  crash.
+- `charm.li` speaks plain `http` (its `https` vhost 502s intermittently), serves its
+  whole tree expanded on one page, and has **no** `Repair and Diagnosis (Single Page)`
+  path and no 2010+ manuals — a 404 from it is normal and costs one round trip.
+  When `index` is crawling at a few KB/s, don't wait it out: `get` the charm.li tree
+  (`http://charm.li/<Make>/<Year>/<Vehicle>/Repair and Diagnosis/`, ~2.9 MB in
+  seconds) and grep it locally, then fetch only the winning pages by their absolute
+  URLs.
 - Pages are cached under `~/.cache/lemon/pages/` for 7 days (`LEMON_TTL` seconds
   overrides; `index --refresh` bypasses). `LEMON_NOCACHE=1` disables the cache entirely.
 - Python 3.9+ (`str.removeprefix`). Stdlib only.

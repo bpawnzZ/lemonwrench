@@ -23,8 +23,10 @@ import hashlib, html as htmllib, json, os, re, ssl, sys, time
 import urllib.error, urllib.parse, urllib.request
 
 BASE = os.environ.get("LEMON_BASE", "https://lemon-manuals.la")
-MIRRORS = ["https://lemon-manuals.la", "https://lemon-manuals.org.ua",
-           "https://lemon-manuals.gy", "https://lemon.dogeware.me"]
+MIRRORS = ["https://lemon-manuals.la",
+           "http://charm.li",              # Operation CHARM: separate host + corpus
+           "https://lemon-manuals.org.ua", "https://lemon-manuals.gy",
+           "https://lemon.dogeware.me"]
 CACHE = os.path.expanduser("~/.cache/lemon")
 UA = "Mozilla/5.0 (X11; Linux x86_64) lemon-manuals-skill/2.1"
 INDEX_VERSION = "2"                     # bump when the .idx layout changes
@@ -32,6 +34,20 @@ PAGE_TTL = int(os.environ.get("LEMON_TTL", 7 * 86400))
 NOCACHE = os.environ.get("LEMON_NOCACHE") == "1"
 RETRY = (408, 429, 500, 502, 503, 504)
 NOT_FOUND = "<title>Page Not Found</title>"
+HOSTS = os.path.join(CACHE, "hosts.json")   # sticky host + cooldowns
+DOWN_FOR = 900                              # a failed host sorts last for 15 min
+WAYBACK = "https://archive.org/wayback/available?url="
+CHALLENGE = "cdn-cgi/challenge-platform"    # Cloudflare JS wall, not a page
+PER_HOST = 45                               # seconds of *silence* before a host loses its turn
+BUDGET = float(os.environ.get("LEMON_BUDGET", 240))  # whole failover chain, wall clock
+
+
+class NotFound(Exception):
+    """This host answered 404 for this URL."""
+
+
+class Blocked(Exception):
+    """This host answered 200 with a bot wall instead of a page."""
 
 
 def _ctx():
@@ -39,9 +55,44 @@ def _ctx():
     return ssl.create_default_context(cafile=caf if os.path.exists(caf) else None)
 
 
+_ST = None
+
+
+def _state():
+    """Host health, read once per process (links() would otherwise stat it per link)."""
+    global _ST
+    if _ST is None:
+        try:
+            _ST = json.load(open(HOSTS, encoding="utf-8"))
+        except Exception:
+            _ST = {}
+    return _ST
+
+
+def _record(base, ok):
+    """Remember the host that worked; cool a host that did not. Never fatal."""
+    st = _state()
+    if ok:
+        st["prefer"] = base
+        st.get("down", {}).pop(base, None)
+    else:
+        st.setdefault("down", {})[base] = time.time() + DOWN_FOR
+    try:
+        os.makedirs(CACHE, exist_ok=True)
+        json.dump(st, open(HOSTS, "w", encoding="utf-8"))
+    except OSError:
+        pass
+
+
 def _bases():
-    """LEMON_BASE first, then the mirrors that aren't it."""
-    return [BASE] + [m for m in MIRRORS if m.rstrip("/") != BASE.rstrip("/")]
+    """Pinned host first, else the one that last answered, then the rest; a host
+    that just failed still gets tried — last — until its cooldown expires."""
+    bases = list(dict.fromkeys([BASE] + MIRRORS))
+    if os.environ.get("LEMON_BASE"):
+        return bases
+    st, now = _state(), time.time()
+    prefer, down = st.get("prefer"), st.get("down", {})
+    return sorted(bases, key=lambda b: (b != prefer, down.get(b, 0) > now))
 
 
 def _ours(url):
@@ -59,36 +110,77 @@ def _page_path(url):
     return os.path.join(CACHE, "pages", hashlib.md5(url.encode()).hexdigest() + ".html")
 
 
+def _looks_404(body):
+    return NOT_FOUND in body[:600]
+
+
+def _challenge(body):
+    return CHALLENGE in body
+
+
 def _get(url, timeout):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=_ctx()) as r:
-            return r.read().decode("utf-8", "replace")
+            body = r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            return NOT_FOUND
+            raise NotFound(url)
         raise
+    if _looks_404(body):
+        raise NotFound(url)
+    if _challenge(body):
+        raise Blocked(url)
+    return body
 
 
-def _try(url, timeout):
+
+def _try(url, timeout, attempts=3):
     """One host, retried on the errors that are worth retrying."""
     last = None
-    for attempt in range(3):
+    for attempt in range(attempts):
         try:
             return _get(url, timeout)
+        except (NotFound, Blocked):
+            raise
         except urllib.error.HTTPError as e:
             if e.code not in RETRY:
                 raise
             last = e
         except (urllib.error.URLError, OSError) as e:   # timeout, DNS, TLS
             last = e
-        if attempt < 2:
+        if attempt < attempts - 1:
             time.sleep(1 + 2 * attempt)
     raise last
 
 
-def fetch(url, timeout=120, nocache=False):
-    """Cached GET, retried, with mirror failover. never raises a bare traceback."""
+def _if_raw(snap):
+    """'…/web/2019/<url>' -> '…/web/2019/if_/<url>': archive's raw bytes, no banner."""
+    return snap.replace("/https://", "/if_/https://", 1).replace("/http://", "/if_/http://", 1)
+
+
+def _wayback(url):
+    """Last resort: an archived snapshot, fetched raw (if_) so no banner is injected."""
+    try:
+        q = urllib.request.Request(WAYBACK + urllib.parse.quote(url, safe=""),
+                                   headers={"User-Agent": UA})
+        with urllib.request.urlopen(q, timeout=30, context=_ctx()) as r:
+            snap = json.load(r).get("archived_snapshots", {}).get("closest") or {}
+        if snap.get("status") != "200" or not snap.get("url"):
+            return None
+        with urllib.request.urlopen(
+                urllib.request.Request(_if_raw(snap["url"]), headers={"User-Agent": UA}),
+                timeout=60, context=_ctx()) as r:
+            return r.read().decode("utf-8", "replace")
+    except Exception:                      # rate limit, no snapshot, network: all "no"
+        return None
+
+
+def fetch(url, timeout=None, nocache=False):
+    """Cached GET, retried, with mirror failover and an archive last resort.
+    The whole chain is bounded by LEMON_BUDGET seconds, so a dead host cannot
+    eat the call; a host that keeps delivering bytes is never cut off.
+    never raises a bare traceback."""
     if url.startswith("/"):
         url = BASE + url
     if not url.endswith("/") and "?" not in url:
@@ -97,17 +189,32 @@ def fetch(url, timeout=120, nocache=False):
     if not (nocache or NOCACHE) and os.path.exists(path):
         if time.time() - os.path.getmtime(path) < PAGE_TTL:
             return open(path, encoding="utf-8").read()
-    last = None
-    for base in _bases():
+    last, missing, bases = None, 0, _bases()
+    deadline = time.time() + (timeout or BUDGET)
+    for base in bases:
+        left = deadline - time.time()
+        if left < 2:
+            break
         try:
-            body = _try(_swap_base(url, base), timeout)
-        except Exception as e:                          # this host is out, try the next
-            last = e
+            body = _try(_swap_base(url, base), min(timeout or PER_HOST, left),
+                        attempts=2 if base == bases[0] else 1)
+        except NotFound:                    # this host has no such page, or 404s it
+            missing += 1
             continue
+        except Exception as e:              # this host is out, try the next
+            last = e
+            _record(base, False)
+            continue
+        _record(base, True)
         if not NOCACHE:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             open(path, "w", encoding="utf-8").write(body)
         return body
+    body = _wayback(url) if last else None   # every host errored: try the archive
+    if body:
+        return body
+    if missing and missing == len(bases):    # every host said 404
+        return NOT_FOUND
     sys.exit(f"all hosts failed for {url}: {last}")
 
 
@@ -238,15 +345,15 @@ IMG_DIR = os.path.join(CACHE, "img")
 NOTES = os.path.join(CACHE, "imgnotes.json")
 
 
-def imgs_of(page_html):
-    """Figure URLs on a page (site icons excluded)."""
+def imgs_of(page_html, page_url=None):
+    """Figure URLs on a page (site icons excluded), resolved against that page."""
     out = []
     for m in re.finditer(r"<img\s+([^>]*)>", page_html, re.I):
         a = m.group(1)
         src = re.search(r"src=['\"]([^'\"]+)['\"]", a)
         if not src or "/icons/" in src.group(1):
             continue
-        u = urllib.parse.urljoin(BASE + "/", htmllib.unescape(src.group(1)))
+        u = urllib.parse.urljoin(page_url or BASE + "/", htmllib.unescape(src.group(1)))
         out.append(u if u.endswith("/") else u + "/")
     return out
 
@@ -265,7 +372,7 @@ def render(url, body=None):
         sys.exit(f"404: {url}")
     out = [text_of(body)]
     notes = load_notes()
-    for u in imgs_of(body):
+    for u in imgs_of(body, url):
         note = notes.get(u)
         out.append(f"[FIGURE {u}] {note}" if note else
                    f"[FIGURE {u}] (no cached description — vision it, then `note`)")
@@ -390,6 +497,27 @@ def selftest():
     assert score("Torque", "/v/x/Y/", ["brake"], 1) is None
     assert _swap_base("https://lemon-manuals.la/v/x/", "https://lemon.dogeware.me") \
         == "https://lemon.dogeware.me/v/x/"
+    # mirrors: charm.li is a base, so pages served from it rewrite and index like ours
+    assert "http://charm.li" in _bases()
+    assert _swap_base("http://charm.li/v/x/", "https://lemon-manuals.la") \
+        == "https://lemon-manuals.la/v/x/"
+    assert _ours("http://charm.li/v/x/")
+    # not-a-page replies are failures, so they never reach the page cache
+    assert _looks_404(NOT_FOUND) and not _looks_404("<title>Real Page</title>")
+    assert _challenge("<script src='/cdn-cgi/challenge-platform/scripts/jsd/main.js'>")
+    assert not _challenge("<title>Real Page</title>")
+    # sticky host first, cooling host last, nothing dropped
+    global _ST
+    _ST = {"prefer": "http://charm.li", "down": {"https://lemon-manuals.la": time.time() + 60}}
+    if not os.environ.get("LEMON_BASE"):
+        b = _bases()
+        assert b[0] == "http://charm.li" and b[-1] == "https://lemon-manuals.la", b
+    _ST = {}
+    assert "http://charm.li" in imgs_of('<img src="/images/X/1/">', "http://charm.li/p/")[0]
+    assert _if_raw("http://web.archive.org/web/20190101/https://x/y/") \
+        == "http://web.archive.org/web/20190101/if_/https://x/y/"
+    assert _if_raw("http://web.archive.org/web/20190101/http://x/y/") \
+        == "http://web.archive.org/web/20190101/if_/http://x/y/"
     assert _page_path("/v/x/").endswith(".html")
     t = ("Tighten the bolts to 10 N.m (89 lb in).\n"
          "Oil pan bolts | 50 N·m (37 ft·lb)\n"
@@ -482,7 +610,7 @@ def main(argv):
         for u, l in sublinks(args[0], body):
             print(f"{u}\t{l}")
     elif cmd == "imgs":
-        print("\n".join(imgs_of(fetch(args[0]))))
+        print("\n".join(imgs_of(fetch(args[0]), args[0])))
     elif cmd == "pic":
         u = args[0]
         os.makedirs(IMG_DIR, exist_ok=True)
